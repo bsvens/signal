@@ -34,6 +34,10 @@ class GridLayout {
   double get _originX => (size.width - _boardPixels) / 2;
   double get _originY => (size.height - _boardPixels) / 2;
 
+  /// The square pixel region the whole board occupies.
+  Rect get boardRect =>
+      Rect.fromLTWH(_originX, _originY, _boardPixels, _boardPixels);
+
   /// Pixel centre of cell `(col, row)`.
   Offset cellCenter(int col, int row) => Offset(
     _originX + (col + 0.5) * cellSize,
