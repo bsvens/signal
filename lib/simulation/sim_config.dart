@@ -7,9 +7,9 @@ class SimConfig {
   const SimConfig({
     this.junctionsPerSide = 4,
     this.blockSize = 2,
-    this.baseInterval = 45,
-    this.ramp = 5,
-    this.minInterval = 8,
+    this.baseInterval = 24,
+    this.ramp = 6,
+    this.minInterval = 6,
     this.queueLimit = 12,
     this.gridlockGrace = 30,
     this.stuckLimit = 240,

@@ -199,4 +199,24 @@ void main() {
       expect(sim.cars, isEmpty);
     });
   });
+
+  group('Spawn curve (difficulty ramp)', () {
+    const config = SimConfig();
+
+    test('starts at BASE_INTERVAL and never speeds up below MIN_INTERVAL', () {
+      expect(config.spawnEveryTicks(0), config.baseInterval);
+      // A very high score is clamped to the fastest allowed interval.
+      expect(config.spawnEveryTicks(100000), config.minInterval);
+    });
+
+    test('interval is monotonically non-increasing as score rises', () {
+      var prev = config.spawnEveryTicks(0);
+      for (var score = 1; score <= 500; score++) {
+        final now = config.spawnEveryTicks(score);
+        expect(now, lessThanOrEqualTo(prev), reason: 'at score $score');
+        expect(now, greaterThanOrEqualTo(config.minInterval));
+        prev = now;
+      }
+    });
+  });
 }

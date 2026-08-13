@@ -29,6 +29,8 @@ class TrafficGame extends FlameGame {
   final ValueNotifier<SimSnapshot> hud;
 
   double _accumulator = 0;
+  double _elapsed =
+      0; // wall time for cosmetic animation only (never sim input)
   bool _paused = false;
 
   bool get isPaused => _paused;
@@ -46,6 +48,7 @@ class TrafficGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    _elapsed += dt;
     if (_paused || _sim.gameOver) return;
 
     _accumulator += dt;
@@ -72,8 +75,17 @@ class TrafficGame extends FlameGame {
   @override
   void render(Canvas canvas) {
     super.render(canvas);
+    final canvasSize = Size(size.x, size.y);
     final layout = _layout();
-    _painter.paint(canvas, layout, _sim.grid, _sim.snapshot, _alpha);
+    _painter.paint(
+      canvas,
+      canvasSize,
+      layout,
+      _sim.grid,
+      _sim.snapshot,
+      _alpha,
+      _elapsed,
+    );
   }
 
   GridLayout _layout() =>

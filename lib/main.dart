@@ -34,6 +34,26 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   late final TrafficGame _game = TrafficGame();
+  bool _wasGameOver = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _game.hud.addListener(_onSnapshot);
+  }
+
+  @override
+  void dispose() {
+    _game.hud.removeListener(_onSnapshot);
+    super.dispose();
+  }
+
+  // Fire a heavier haptic once, on the transition into gridlock.
+  void _onSnapshot() {
+    final over = _game.hud.value.gameOver;
+    if (over && !_wasGameOver) HapticFeedback.heavyImpact();
+    _wasGameOver = over;
+  }
 
   void _onTapDown(TapDownDetails details) {
     if (_game.handleTapAtPixel(details.localPosition)) {

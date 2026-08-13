@@ -23,7 +23,11 @@ class TrafficSimulation {
     this.config = const SimConfig(),
     this.autoSpawn = true,
   }) : grid = CityGrid.build(config),
-       _rng = DeterministicRng(seed);
+       _rng = DeterministicRng(seed) {
+    // Prime the spawner so the first car arrives almost immediately instead of
+    // after a full BASE_INTERVAL of empty grid (a dead-feeling launch).
+    _ticksSinceLastSpawn = config.baseInterval;
+  }
 
   final SimConfig config;
   final CityGrid grid;
