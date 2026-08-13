@@ -1,7 +1,10 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'game/traffic_game.dart';
+import 'ui/game_over.dart';
+import 'ui/hud.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,10 +35,34 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   late final TrafficGame _game = TrafficGame();
 
+  void _onTapDown(TapDownDetails details) {
+    if (_game.handleTapAtPixel(details.localPosition)) {
+      HapticFeedback.selectionClick();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(child: GameWidget(game: _game)),
+      backgroundColor: const Color(0xFF10131A),
+      body: Stack(
+        children: [
+          // The board. A transparent tap layer sits directly over it and
+          // converts pixels to a junction toggle.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: _onTapDown,
+              child: GameWidget(game: _game),
+            ),
+          ),
+          // Non-interactive HUD chrome ignores pointer so board taps pass
+          // through; only its pause button (a Material InkWell) catches taps.
+          Positioned.fill(child: Hud(game: _game)),
+          // Game-over overlay: transparent and non-blocking until gridlock.
+          Positioned.fill(child: GameOverOverlay(game: _game)),
+        ],
+      ),
     );
   }
 }
