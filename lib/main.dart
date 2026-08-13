@@ -35,9 +35,7 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: GameWidget(game: _game),
-      ),
+      body: SafeArea(child: GameWidget(game: _game)),
     );
   }
 }
