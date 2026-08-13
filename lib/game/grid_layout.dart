@@ -12,7 +12,7 @@ class GridLayout {
   GridLayout({
     required this.size,
     required this.maxCoord,
-    this.marginFraction = 0.06,
+    this.marginFraction = 0.03,
   });
 
   /// Current drawing surface size, in logical pixels.

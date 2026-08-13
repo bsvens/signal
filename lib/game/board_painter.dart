@@ -171,6 +171,18 @@ class BoardPainter {
         _p,
       );
     }
+
+    // A warm rooftop light on some buildings for a bit of night-city glow.
+    if (_rand(col, row, 9) > 0.55) {
+      final c = Offset(
+        roof.left + roof.width * (0.35 + 0.3 * _rand(col, row, 11)),
+        roof.top + roof.height * (0.35 + 0.3 * _rand(col, row, 12)),
+      );
+      _glow.color = const Color(0x66FFCF7A);
+      canvas.drawCircle(c, cs * 0.05, _glow);
+      _p.color = const Color(0xFFFFE0A3);
+      canvas.drawCircle(c, cs * 0.022, _p);
+    }
   }
 
   void _paintPark(Canvas canvas, GridLayout layout, int col, int row) {
@@ -386,8 +398,27 @@ class BoardPainter {
       var center = layout.lerpCenter(car.previousCell, car.cell, alpha);
       final heading = car.heading;
 
-      // Length along travel, width across; keep to the right-hand lane.
-      double len = cs * 0.46, wid = cs * 0.26;
+      // Vehicle type (stable per car): sedan, compact, truck, van.
+      final type = car.id % 4;
+      double lenF, widF;
+      var isTruck = false;
+      switch (type) {
+        case 0:
+          lenF = 0.48;
+          widF = 0.26;
+        case 1:
+          lenF = 0.40;
+          widF = 0.25;
+        case 2:
+          lenF = 0.62;
+          widF = 0.30;
+          isTruck = true;
+        default:
+          lenF = 0.50;
+          widF = 0.29;
+      }
+      double len = cs * lenF, wid = cs * widF;
+
       Offset fwd = Offset.zero;
       if (heading != null) {
         fwd = Offset(heading.dCol.toDouble(), heading.dRow.toDouble());
@@ -412,14 +443,29 @@ class BoardPainter {
       );
 
       // Body (stable per-car colour).
-      _p.color = _carColors[car.id % _carColors.length];
+      final bodyColor = _carColors[car.id % _carColors.length];
+      _p.color = bodyColor;
       canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), _p);
 
-      // Windshield toward the front.
+      // Trucks get a darker cargo box over their rear half.
+      if (isTruck && heading != null) {
+        final boxCenter = center - fwd * (len * 0.20);
+        final bw = horizontal ? len * 0.54 : wid;
+        final bh = horizontal ? wid : len * 0.54;
+        _p.color = _darken(bodyColor, 0.22);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(center: boxCenter, width: bw, height: bh),
+            Radius.circular(wid * 0.2),
+          ),
+          _p,
+        );
+      }
+
       if (heading != null) {
-        final wsCenter = center + fwd * (len * 0.16);
-        final wsW = horizontal ? len * 0.26 : wid * 0.66;
-        final wsH = horizontal ? wid * 0.66 : len * 0.26;
+        final wsCenter = center + fwd * (len * 0.20);
+        final wsW = horizontal ? len * 0.22 : wid * 0.66;
+        final wsH = horizontal ? wid * 0.66 : len * 0.22;
         _p.color = const Color(0xB3121820);
         canvas.drawRRect(
           RRect.fromRectAndRadius(
@@ -429,10 +475,11 @@ class BoardPainter {
           _p,
         );
 
-        // Lights: white headlights up front; red brake lights when waiting.
         final rear = center - fwd * (len * 0.42);
         final front = center + fwd * (len * 0.42);
         final side = Offset(-fwd.dy, fwd.dx) * (wid * 0.28);
+
+        // White headlights up front; pulsing red brake lights when waiting.
         if (car.state == CarState.waiting) {
           final pulse = 0.6 + 0.4 * math.sin(timeSeconds * 6 + car.id);
           _p.color = Color.lerp(
@@ -446,6 +493,25 @@ class BoardPainter {
           _p.color = const Color(0xFFFFF6D6);
           canvas.drawCircle(front + side, wid * 0.09, _p);
           canvas.drawCircle(front - side, wid * 0.09, _p);
+        }
+
+        // Amber turn signal when the car is pivoting at this cell.
+        final moved = car.previousCell != car.cell;
+        if (moved) {
+          final inc = Offset(
+            (car.cell.col - car.previousCell.col).toDouble(),
+            (car.cell.row - car.previousCell.row).toDouble(),
+          );
+          final turning = inc.dx != fwd.dx || inc.dy != fwd.dy;
+          if (turning && math.sin(timeSeconds * 9) > 0) {
+            final incRight = Offset(-inc.dy, inc.dx);
+            final turningRight = fwd.dx == incRight.dx && fwd.dy == incRight.dy;
+            final blinkSide = turningRight
+                ? Offset(-fwd.dy, fwd.dx)
+                : Offset(fwd.dy, -fwd.dx);
+            _p.color = const Color(0xFFFFB020);
+            canvas.drawCircle(front + blinkSide * (wid * 0.32), wid * 0.1, _p);
+          }
         }
       }
     }
