@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../game/traffic_game.dart';
@@ -14,36 +16,41 @@ class Hud extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    final mq = MediaQuery.of(context);
+    // The board is a centered square of side shortestSide * 0.94 (see
+    // GridLayout). Anchor the HUD to the band just above it so the instrument
+    // panel and the board read as one machine instead of drifting apart.
+    final board = mq.size.shortestSide * 0.94;
+    final topBand = (mq.size.height - board) / 2;
+    final topPad = math.max(mq.padding.top + 8, topBand - 64);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, topPad, 16, 0),
       child: Align(
         alignment: Alignment.topCenter,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: ValueListenableBuilder<SimSnapshot>(
-            valueListenable: game.hud,
-            builder: (context, snap, _) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Read-outs ignore pointers so taps fall through to the
-                  // board; only the pause button catches its own taps.
-                  IgnorePointer(
-                    child: ValueListenableBuilder<int>(
-                      valueListenable: game.bestScore,
-                      builder: (context, best, _) =>
-                          _ScorePill(score: snap.score, best: best),
-                    ),
+        child: ValueListenableBuilder<SimSnapshot>(
+          valueListenable: game.hud,
+          builder: (context, snap, _) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Read-outs ignore pointers so taps fall through to the
+                // board; only the pause button catches its own taps.
+                IgnorePointer(
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: game.bestScore,
+                    builder: (context, best, _) =>
+                        _ScorePill(score: snap.score, best: best),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: IgnorePointer(child: _QueueMeter(snapshot: snap)),
-                  ),
-                  const SizedBox(width: 14),
-                  _PauseButton(game: game),
-                ],
-              );
-            },
-          ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: IgnorePointer(child: _QueueMeter(snapshot: snap)),
+                ),
+                const SizedBox(width: 14),
+                _PauseButton(game: game),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -151,17 +158,29 @@ class _QueueMeter extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: Stack(
-            children: [
-              Container(height: 10, color: const Color(0x66000000)),
-              AnimatedFractionallySizedBox(
-                duration: const Duration(milliseconds: 200),
-                widthFactor: fill,
-                child: Container(height: 10, color: color),
-              ),
-            ],
+        Container(
+          height: 12,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B2130),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFF2A3140)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Stack(
+              children: [
+                AnimatedFractionallySizedBox(
+                  duration: const Duration(milliseconds: 200),
+                  widthFactor: fill,
+                  child: Container(color: color),
+                ),
+                // Danger tick at the gridlock limit.
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(width: 2, color: const Color(0x99FF5A5A)),
+                ),
+              ],
+            ),
           ),
         ),
       ],

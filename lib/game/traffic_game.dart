@@ -130,9 +130,26 @@ class TrafficGame extends FlameGame {
   /// junction, so the caller can fire haptic feedback only on a real action.
   bool handleTapAtPixel(Offset p) {
     if (_sim.gameOver) return false;
-    final cell = _layout().cellAt(p);
-    if (cell == null) return false;
-    final junction = _sim.grid.junctionAt(cell);
+    final layout = _layout();
+
+    // Exact hit first; then forgive near-misses by snapping to the nearest
+    // junction within a comfortable radius (a panicked tap on the road beside a
+    // junction should still count). Pure input mapping — the sim only ever
+    // receives toggleJunction(id).
+    final cell = layout.cellAt(p);
+    var junction = cell == null ? null : _sim.grid.junctionAt(cell);
+    if (junction == null) {
+      final maxDist = layout.cellSize * 0.8;
+      var best = double.infinity;
+      for (final j in _sim.grid.junctions) {
+        final c = layout.cellCenter(j.cell.col, j.cell.row);
+        final d = (c - p).distance;
+        if (d < best && d <= maxDist) {
+          best = d;
+          junction = j;
+        }
+      }
+    }
     if (junction == null) return false;
     _sim.toggleJunction(junction.id);
     hud.value = _sim.snapshot;
@@ -143,6 +160,12 @@ class TrafficGame extends FlameGame {
     if (_sim.gameOver) return;
     _paused = !_paused;
   }
+
+  /// Hold the sim still while the title/menu is showing.
+  void pauseForMenu() => _paused = true;
+
+  /// Release from the menu into live play.
+  void beginPlay() => _paused = false;
 
   /// Start a fresh run with a new seed.
   void restart() {

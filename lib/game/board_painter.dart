@@ -9,40 +9,39 @@ import '../simulation/direction.dart';
 import '../simulation/snapshot.dart';
 import 'grid_layout.dart';
 
-/// Draws a [SimSnapshot] as a top-down city: asphalt roads with lane markings,
-/// intersections with crosswalks and traffic-signal heads, little top-down cars,
-/// and buildings / parks / trees filling the blocks.
+/// Draws a [SimSnapshot] as a top-down city. Pure presentation (Hard Rule #2):
+/// it reads sim state and paints it, with no game logic. The sim's cell is the
+/// position of record; [alpha] only smooths motion and [timeSeconds] only drives
+/// cosmetic animation.
 ///
-/// Pure presentation (Hard Rule #2): it reads sim state and paints it, with no
-/// game logic. The sim's cell is the position of record; [alpha] only smooths
-/// motion between ticks and [timeSeconds] only drives cosmetic animation. Static
-/// scenery (buildings, trees) is derived deterministically from cell coordinates
-/// so it never flickers between frames.
+/// Visual hierarchy is deliberate (per the design pass): roads and the green
+/// signal axis are the primary read; lane markings, scenery and skyline are
+/// texture. Saturated color is spent only where it means something — green =
+/// go/state, red = stop/danger, car bodies = the moving agents.
 class BoardPainter {
-  // Void / sky behind the city.
-  static const Color _voidTop = Color(0xFF151A24);
+  // Void / sky.
+  static const Color _voidTop = Color(0xFF10141D);
   static const Color _voidBottom = Color(0xFF0B0D13);
+  static const Color _skyline = Color(0xFF171C27);
 
   // Ground.
-  static const Color _asphalt = Color(0xFF23272F);
-  static const Color _asphaltEdge = Color(0xFF2B303A);
-  static const Color _sidewalk = Color(0xFF3C4250);
-  static const Color _laneYellow = Color(0xFFD8B24A);
-  static const Color _crosswalk = Color(0xCCE9EDF5);
-  static const Color _grass = Color(0xFF2F5138);
+  static const Color _asphalt = Color(0xFF272C37);
+  static const Color _sidewalk = Color(0xFF343A47);
+  static const Color _lane = Color(0x478A93A6); // grey-blue, low alpha
+  static const Color _grass = Color(0xFF2C4A36);
+  static const Color _portal = Color(0x2E8A93A6);
 
   // Signals.
   static const Color _sigGreen = Color(0xFF3BDB86);
   static const Color _sigRed = Color(0xFFE5484D);
-  static const Color _sigHousing = Color(0xFF15181F);
 
   static const List<Color> _buildings = [
-    Color(0xFF4A5468),
-    Color(0xFF566175),
-    Color(0xFF46506A),
-    Color(0xFF5B5566),
-    Color(0xFF4E5A66),
-    Color(0xFF614F58),
+    Color(0xFF3E4759),
+    Color(0xFF464F63),
+    Color(0xFF4E586E),
+    Color(0xFF545E74),
+    Color(0xFF58627A),
+    Color(0xFF5E6980),
   ];
 
   static const List<Color> _carColors = [
@@ -60,6 +59,11 @@ class BoardPainter {
     ..isAntiAlias = true
     ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
 
+  // Renderer-local cosmetic memory (not sim state): last-seen green axis and the
+  // time it last changed, for the toggle ripple. Presentation only.
+  final Map<int, RoadAxis> _lastAxis = {};
+  final Map<int, double> _changeAt = {};
+
   void paint(
     Canvas canvas,
     Size canvasSize,
@@ -69,14 +73,16 @@ class BoardPainter {
     double alpha,
     double timeSeconds,
   ) {
-    _paintVoid(canvas, canvasSize);
-    _paintLots(canvas, layout, grid); // buildings, parks, trees (blocks)
-    _paintRoads(canvas, layout, grid); // asphalt + lane markings
-    _paintIntersections(canvas, layout, grid, snapshot); // crosswalks + signals
+    _paintBackdrop(canvas, canvasSize, layout);
+    _paintLots(canvas, layout, grid);
+    _paintRoads(canvas, layout, grid);
+    _paintPortals(canvas, layout, grid);
+    _paintJunctions(canvas, layout, grid, snapshot, timeSeconds);
     _paintCars(canvas, layout, snapshot, alpha, timeSeconds);
+    _paintDanger(canvas, canvasSize, layout, snapshot);
   }
 
-  // Deterministic per-cell pseudo-random in [0,1): stable scenery, no flicker.
+  // Deterministic per-key pseudo-random in [0,1): stable scenery, no flicker.
   double _rand(int a, int b, [int salt = 0]) {
     var h = a * 374761393 + b * 668265263 + salt * 2246822519;
     h = (h ^ (h >> 13)) * 1274126177;
@@ -84,7 +90,9 @@ class BoardPainter {
     return (h & 0x7fffffff) / 0x7fffffff;
   }
 
-  void _paintVoid(Canvas canvas, Size size) {
+  // ---- Backdrop: gradient, skyline, ambient vignette ----
+
+  void _paintBackdrop(Canvas canvas, Size size, GridLayout layout) {
     final rect = Offset.zero & size;
     _p
       ..shader = Gradient.linear(
@@ -93,6 +101,39 @@ class BoardPainter {
         const [_voidTop, _voidBottom],
       )
       ..color = const Color(0xFFFFFFFF);
+    canvas.drawRect(rect, _p);
+    _p.shader = null;
+
+    // A city horizon rising from the bottom of the screen, below the board.
+    final board = layout.boardRect;
+    final bandTop = board.bottom;
+    final maxH = math.min(size.height * 0.10, (size.height - bandTop) * 0.85);
+    if (maxH > 8) {
+      const n = 18;
+      final w = size.width / n;
+      for (var i = 0; i < n; i++) {
+        final h = maxH * (0.35 + 0.65 * _rand(i, 0, 3));
+        final bx = i * w;
+        _p.color = _skyline;
+        canvas.drawRect(Rect.fromLTWH(bx, size.height - h, w + 1, h), _p);
+        if (_rand(i, 0, 4) > 0.5) {
+          _p.color = const Color(0x3DFFCF7A);
+          canvas.drawCircle(
+            Offset(bx + w * 0.5, size.height - h + maxH * 0.18),
+            1.6,
+            _p,
+          );
+        }
+      }
+    }
+
+    // Ambient vignette: darken the corners so the eye settles on the board.
+    _p.shader = Gradient.radial(
+      board.center,
+      size.longestSide * 0.62,
+      const [Color(0x00000000), Color(0x38000000)],
+      const [0.55, 1.0],
+    );
     canvas.drawRect(rect, _p);
     _p.shader = null;
   }
@@ -105,8 +146,6 @@ class BoardPainter {
         final cell = Cell(col, row);
         if (grid.isRoad(cell)) continue;
         final rect = layout.cellRect(col, row).inflate(0.5);
-
-        // Sidewalk pad under everything on the block.
         _p.color = _sidewalk;
         canvas.drawRRect(
           RRect.fromRectAndRadius(
@@ -115,7 +154,6 @@ class BoardPainter {
           ),
           _p,
         );
-
         if (_rand(col, row, 7) < 0.28) {
           _paintPark(canvas, layout, col, row);
         } else {
@@ -132,7 +170,6 @@ class BoardPainter {
         _buildings[(_rand(col, row) * _buildings.length).floor() %
             _buildings.length];
 
-    // Footprint with a soft drop shadow to suggest height.
     _p.color = const Color(0x33000000);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
@@ -147,32 +184,16 @@ class BoardPainter {
       _p,
     );
 
-    // Rooftop inset (darker) + a couple of rooftop units.
+    // A single rooftop unit (kept minimal — see design cut list).
     final roof = foot.deflate(cs * 0.06);
-    _p.color = _darken(color, 0.14);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(roof, Radius.circular(cs * 0.03)),
-      _p,
-    );
-    _p.color = _darken(color, 0.28);
-    final unit = cs * 0.09;
+    _p.color = _darken(color, 0.2);
+    final unit = cs * 0.1;
     canvas.drawRect(
       Rect.fromLTWH(roof.left + cs * 0.04, roof.top + cs * 0.04, unit, unit),
       _p,
     );
-    if (_rand(col, row, 3) > 0.5) {
-      canvas.drawRect(
-        Rect.fromLTWH(
-          roof.right - cs * 0.04 - unit,
-          roof.bottom - cs * 0.04 - unit,
-          unit,
-          unit,
-        ),
-        _p,
-      );
-    }
 
-    // A warm rooftop light on some buildings for a bit of night-city glow.
+    // Warm rooftop light on some buildings (ambiance).
     if (_rand(col, row, 9) > 0.55) {
       final c = Offset(
         roof.left + roof.width * (0.35 + 0.3 * _rand(col, row, 11)),
@@ -205,46 +226,32 @@ class BoardPainter {
 
   void _paintTree(Canvas canvas, Offset c, double r) {
     _p.color = const Color(0x33000000);
-    canvas.drawCircle(c.translate(r * 0.2, r * 0.25), r, _p); // shadow
+    canvas.drawCircle(c.translate(r * 0.2, r * 0.25), r, _p);
     _p.color = const Color(0xFF2E6B3E);
     canvas.drawCircle(c, r, _p);
     _p.color = const Color(0xFF3E8A50);
     canvas.drawCircle(c.translate(-r * 0.22, -r * 0.22), r * 0.62, _p);
   }
 
-  // ---- Roads ----
+  // ---- Roads: asphalt + demoted lane markings ----
 
   void _paintRoads(Canvas canvas, GridLayout layout, CityGrid grid) {
-    // Asphalt first (full cells so roads merge into continuous strips).
     for (final cell in grid.roadCells) {
       final rect = layout.cellRect(cell.col, cell.row).inflate(0.6);
       _p.color = _asphalt;
       canvas.drawRect(rect, _p);
     }
-    // Lane markings on straight segments (not through intersections).
     for (final cell in grid.roadCells) {
       if (grid.isJunction(cell)) continue;
+      final rect = layout.cellRect(cell.col, cell.row);
       final hasH =
           grid.isRoad(cell.step(Direction.east)) ||
           grid.isRoad(cell.step(Direction.west));
-      final rect = layout.cellRect(cell.col, cell.row);
       if (hasH) {
         _dashedLine(
           canvas,
           Offset(rect.left, rect.center.dy),
           Offset(rect.right, rect.center.dy),
-          layout,
-        );
-        _edgeLine(
-          canvas,
-          Offset(rect.left, rect.top),
-          Offset(rect.right, rect.top),
-          layout,
-        );
-        _edgeLine(
-          canvas,
-          Offset(rect.left, rect.bottom),
-          Offset(rect.right, rect.bottom),
           layout,
         );
       } else {
@@ -254,135 +261,197 @@ class BoardPainter {
           Offset(rect.center.dx, rect.bottom),
           layout,
         );
-        _edgeLine(
-          canvas,
-          Offset(rect.left, rect.top),
-          Offset(rect.left, rect.bottom),
-          layout,
-        );
-        _edgeLine(
-          canvas,
-          Offset(rect.right, rect.top),
-          Offset(rect.right, rect.bottom),
-          layout,
-        );
       }
     }
   }
 
   void _dashedLine(Canvas canvas, Offset a, Offset b, GridLayout layout) {
     final cs = layout.cellSize;
-    _p.color = _laneYellow;
+    _p
+      ..color = _lane
+      ..strokeWidth = cs * 0.03
+      ..strokeCap = StrokeCap.round;
     final total = (b - a).distance;
     final dir = (b - a) / total;
-    final dash = cs * 0.16, gap = cs * 0.12, thick = cs * 0.035;
+    final dash = cs * 0.16, gap = cs * 0.12;
     for (var d = cs * 0.08; d < total; d += dash + gap) {
       final s = a + dir * d;
       final e = a + dir * math.min(d + dash, total);
-      canvas.drawLine(
-        s,
-        e,
-        _p
-          ..strokeWidth = thick
-          ..strokeCap = StrokeCap.round,
-      );
+      canvas.drawLine(s, e, _p);
     }
   }
 
-  void _edgeLine(Canvas canvas, Offset a, Offset b, GridLayout layout) {
-    _p
-      ..color = _asphaltEdge
-      ..strokeWidth = layout.cellSize * 0.05
-      ..strokeCap = StrokeCap.square;
-    canvas.drawLine(a, b, _p);
+  // ---- Spawn / exit portals at the board perimeter ----
+
+  void _paintPortals(Canvas canvas, GridLayout layout, CityGrid grid) {
+    final cs = layout.cellSize;
+    for (final cell in grid.edgeCells) {
+      if (grid.isJunction(cell)) continue; // mark straight road mouths only
+      for (final dir in Direction.values) {
+        final n = cell.step(dir);
+        final offBoard =
+            n.col < 0 ||
+            n.row < 0 ||
+            n.col > grid.maxCoord ||
+            n.row > grid.maxCoord;
+        if (!offBoard) continue;
+        final center = layout
+            .cellCenter(cell.col, cell.row)
+            .translate(dir.dCol * cs * 0.52, dir.dRow * cs * 0.52);
+        final horizontal = dir == Direction.north || dir == Direction.south;
+        final w = horizontal ? cs * 0.5 : cs * 0.2;
+        final h = horizontal ? cs * 0.2 : cs * 0.5;
+        _p.color = _portal;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(center: center, width: w, height: h),
+            Radius.circular(cs * 0.1),
+          ),
+          _p,
+        );
+      }
+    }
   }
 
-  // ---- Intersections: crosswalks + signal heads ----
+  // ---- Intersections: tap disc, green corridor bar, red stop lines ----
 
-  void _paintIntersections(
+  void _paintJunctions(
     Canvas canvas,
     GridLayout layout,
     CityGrid grid,
     SimSnapshot snapshot,
+    double time,
   ) {
     final cs = layout.cellSize;
     for (final j in snapshot.junctions) {
       final rect = layout.cellRect(j.cell.col, j.cell.row);
+      final center = rect.center;
       final nsGreen = j.greenAxis == RoadAxis.ns;
 
-      // Crosswalk ladders on each approach that has a road.
-      for (final dir in Direction.values) {
-        if (!grid.isRoad(j.cell.step(dir))) continue;
-        _paintCrosswalk(canvas, rect, dir, cs);
+      // Tap affordance: a faint disc says "this is a button".
+      _p.color = const Color(0x0DFFFFFF);
+      canvas.drawCircle(center, cs * 0.46, _p);
+      _p
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = const Color(0x1AFFFFFF);
+      canvas.drawCircle(center, cs * 0.46, _p);
+      _p.style = PaintingStyle.fill;
+
+      // Track state change for the toggle ripple (cosmetic memory only).
+      if (!_lastAxis.containsKey(j.id)) {
+        _lastAxis[j.id] = j.greenAxis;
+      } else if (_lastAxis[j.id] != j.greenAxis) {
+        _changeAt[j.id] = time;
+        _lastAxis[j.id] = j.greenAxis;
       }
 
-      // Signal heads: green on the go-axis approaches, red on the others.
-      _paintSignal(
-        canvas,
-        Offset(rect.center.dx, rect.top + cs * 0.16),
-        nsGreen ? _sigGreen : _sigRed,
-        cs,
-      ); // north
-      _paintSignal(
-        canvas,
-        Offset(rect.center.dx, rect.bottom - cs * 0.16),
-        nsGreen ? _sigGreen : _sigRed,
-        cs,
-      ); // south
-      _paintSignal(
-        canvas,
-        Offset(rect.right - cs * 0.16, rect.center.dy),
-        nsGreen ? _sigRed : _sigGreen,
-        cs,
-      ); // east
-      _paintSignal(
-        canvas,
-        Offset(rect.left + cs * 0.16, rect.center.dy),
-        nsGreen ? _sigRed : _sigGreen,
-        cs,
-      ); // west
-    }
-  }
+      // Green "go corridor": a glowing bar along the open axis. Orientation
+      // encodes the state (colour-blind safe by geometry).
+      final greenRect = nsGreen
+          ? Rect.fromCenter(center: center, width: cs * 0.30, height: cs * 0.94)
+          : Rect.fromCenter(
+              center: center,
+              width: cs * 0.94,
+              height: cs * 0.30,
+            );
+      _p.color = _sigGreen.withValues(alpha: 0.22);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(greenRect, Radius.circular(cs * 0.15)),
+        _p,
+      );
+      final coreRect = nsGreen
+          ? Rect.fromCenter(center: center, width: cs * 0.08, height: cs * 0.94)
+          : Rect.fromCenter(
+              center: center,
+              width: cs * 0.94,
+              height: cs * 0.08,
+            );
+      final breathe = 0.4 + 0.15 * math.sin(time * 2 + j.id);
+      _glow.color = _sigGreen.withValues(alpha: breathe);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(coreRect, Radius.circular(cs * 0.06)),
+        _glow,
+      );
+      _p.color = _sigGreen;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(coreRect, Radius.circular(cs * 0.06)),
+        _p,
+      );
 
-  void _paintCrosswalk(Canvas canvas, Rect rect, Direction dir, double cs) {
-    _p.color = _crosswalk;
-    final horizontal = dir == Direction.north || dir == Direction.south;
-    const stripes = 4;
-    for (var i = 0; i < stripes; i++) {
-      final t = (i + 0.5) / stripes;
-      if (horizontal) {
-        final x = rect.left + rect.width * (0.28 + 0.44 * t);
-        final y = dir == Direction.north
-            ? rect.top + cs * 0.05
-            : rect.bottom - cs * 0.11;
-        canvas.drawRect(Rect.fromLTWH(x, y, cs * 0.05, cs * 0.06), _p);
+      // Red stop lines across the blocked approaches (only where a road exists).
+      _p.color = _sigRed;
+      if (nsGreen) {
+        // E–W blocked: vertical stop bars at the west/east entrances.
+        if (grid.isRoad(j.cell.step(Direction.west))) {
+          canvas.drawRRect(
+            _stopBar(
+              rect.left + cs * 0.12,
+              center.dy,
+              cs * 0.06,
+              cs * 0.32,
+              cs,
+            ),
+            _p,
+          );
+        }
+        if (grid.isRoad(j.cell.step(Direction.east))) {
+          canvas.drawRRect(
+            _stopBar(
+              rect.right - cs * 0.12,
+              center.dy,
+              cs * 0.06,
+              cs * 0.32,
+              cs,
+            ),
+            _p,
+          );
+        }
       } else {
-        final y = rect.top + rect.height * (0.28 + 0.44 * t);
-        final x = dir == Direction.west
-            ? rect.left + cs * 0.05
-            : rect.right - cs * 0.11;
-        canvas.drawRect(Rect.fromLTWH(x, y, cs * 0.06, cs * 0.05), _p);
+        // N–S blocked: horizontal stop bars at the north/south entrances.
+        if (grid.isRoad(j.cell.step(Direction.north))) {
+          canvas.drawRRect(
+            _stopBar(center.dx, rect.top + cs * 0.12, cs * 0.32, cs * 0.06, cs),
+            _p,
+          );
+        }
+        if (grid.isRoad(j.cell.step(Direction.south))) {
+          canvas.drawRRect(
+            _stopBar(
+              center.dx,
+              rect.bottom - cs * 0.12,
+              cs * 0.32,
+              cs * 0.06,
+              cs,
+            ),
+            _p,
+          );
+        }
+      }
+
+      // Toggle ripple: an expanding white ring for 0.25s after a change.
+      final t0 = _changeAt[j.id];
+      if (t0 != null && time - t0 < 0.25) {
+        final k = (time - t0) / 0.25;
+        _p
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = cs * 0.04
+          ..color = Color.lerp(
+            const Color(0x80FFFFFF),
+            const Color(0x00FFFFFF),
+            k,
+          )!;
+        canvas.drawCircle(center, cs * (0.3 + 0.3 * k), _p);
+        _p.style = PaintingStyle.fill;
       }
     }
   }
 
-  void _paintSignal(Canvas canvas, Offset c, Color color, double cs) {
-    final housing = cs * 0.15;
-    _p.color = _sigHousing;
-    canvas.drawRRect(
+  RRect _stopBar(double cx, double cy, double w, double h, double cs) =>
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: c, width: housing, height: housing),
-        Radius.circular(housing * 0.3),
-      ),
-      _p,
-    );
-    if (color == _sigGreen) {
-      _glow.color = color.withValues(alpha: 0.6);
-      canvas.drawCircle(c, cs * 0.09, _glow);
-    }
-    _p.color = color;
-    canvas.drawCircle(c, cs * 0.05, _p);
-  }
+        Rect.fromCenter(center: Offset(cx, cy), width: w, height: h),
+        Radius.circular(cs * 0.03),
+      );
 
   // ---- Cars ----
 
@@ -398,7 +467,6 @@ class BoardPainter {
       var center = layout.lerpCenter(car.previousCell, car.cell, alpha);
       final heading = car.heading;
 
-      // Vehicle type (stable per car): sedan, compact, truck, van.
       final type = car.id % 4;
       double lenF, widF;
       var isTruck = false;
@@ -422,7 +490,7 @@ class BoardPainter {
       Offset fwd = Offset.zero;
       if (heading != null) {
         fwd = Offset(heading.dCol.toDouble(), heading.dRow.toDouble());
-        final right = Offset(-fwd.dy, fwd.dx); // right-hand side of travel
+        final right = Offset(-fwd.dy, fwd.dx);
         center = center + right * (cs * 0.16);
       } else {
         len = wid = cs * 0.34;
@@ -431,23 +499,19 @@ class BoardPainter {
       final horizontal = heading == Direction.east || heading == Direction.west;
       final w = heading == null ? len : (horizontal ? len : wid);
       final h = heading == null ? len : (horizontal ? wid : len);
-
       final rect = Rect.fromCenter(center: center, width: w, height: h);
       final radius = Radius.circular(wid * 0.34);
 
-      // Shadow.
       _p.color = const Color(0x55000000);
       canvas.drawRRect(
         RRect.fromRectAndRadius(rect.translate(cs * 0.02, cs * 0.03), radius),
         _p,
       );
 
-      // Body (stable per-car colour).
       final bodyColor = _carColors[car.id % _carColors.length];
       _p.color = bodyColor;
       canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), _p);
 
-      // Trucks get a darker cargo box over their rear half.
       if (isTruck && heading != null) {
         final boxCenter = center - fwd * (len * 0.20);
         final bw = horizontal ? len * 0.54 : wid;
@@ -478,8 +542,6 @@ class BoardPainter {
         final rear = center - fwd * (len * 0.42);
         final front = center + fwd * (len * 0.42);
         final side = Offset(-fwd.dy, fwd.dx) * (wid * 0.28);
-
-        // White headlights up front; pulsing red brake lights when waiting.
         if (car.state == CarState.waiting) {
           final pulse = 0.6 + 0.4 * math.sin(timeSeconds * 6 + car.id);
           _p.color = Color.lerp(
@@ -494,27 +556,29 @@ class BoardPainter {
           canvas.drawCircle(front + side, wid * 0.09, _p);
           canvas.drawCircle(front - side, wid * 0.09, _p);
         }
-
-        // Amber turn signal when the car is pivoting at this cell.
-        final moved = car.previousCell != car.cell;
-        if (moved) {
-          final inc = Offset(
-            (car.cell.col - car.previousCell.col).toDouble(),
-            (car.cell.row - car.previousCell.row).toDouble(),
-          );
-          final turning = inc.dx != fwd.dx || inc.dy != fwd.dy;
-          if (turning && math.sin(timeSeconds * 9) > 0) {
-            final incRight = Offset(-inc.dy, inc.dx);
-            final turningRight = fwd.dx == incRight.dx && fwd.dy == incRight.dy;
-            final blinkSide = turningRight
-                ? Offset(-fwd.dy, fwd.dx)
-                : Offset(fwd.dy, -fwd.dx);
-            _p.color = const Color(0xFFFFB020);
-            canvas.drawCircle(front + blinkSide * (wid * 0.32), wid * 0.1, _p);
-          }
-        }
       }
     }
+  }
+
+  // ---- Danger vignette (rising congestion) ----
+
+  void _paintDanger(
+    Canvas canvas,
+    Size size,
+    GridLayout layout,
+    SimSnapshot snapshot,
+  ) {
+    final fill = snapshot.queueFill;
+    if (fill < 0.7) return;
+    final a = (0.1 * ((fill - 0.7) / 0.3)).clamp(0.0, 0.1);
+    _p.shader = Gradient.radial(
+      layout.boardRect.center,
+      size.longestSide * 0.6,
+      [const Color(0x00E5484D), _sigRed.withValues(alpha: a)],
+      const [0.5, 1.0],
+    );
+    canvas.drawRect(Offset.zero & size, _p);
+    _p.shader = null;
   }
 
   Color _darken(Color c, double amount) {

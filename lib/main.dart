@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'game/traffic_game.dart';
 import 'ui/game_over.dart';
 import 'ui/hud.dart';
+import 'ui/menu.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,11 +36,18 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   late final TrafficGame _game = TrafficGame();
   bool _wasGameOver = false;
+  bool _showMenu = true;
 
   @override
   void initState() {
     super.initState();
+    _game.pauseForMenu(); // hold the board still under the title screen
     _game.hud.addListener(_onSnapshot);
+  }
+
+  void _play() {
+    setState(() => _showMenu = false);
+    _game.beginPlay();
   }
 
   @override
@@ -78,9 +86,15 @@ class _GameScreenState extends State<GameScreen> {
           ),
           // Non-interactive HUD chrome ignores pointer so board taps pass
           // through; only its pause button (a Material InkWell) catches taps.
-          Positioned.fill(child: Hud(game: _game)),
+          // Hidden while the title screen is up.
+          if (!_showMenu) Positioned.fill(child: Hud(game: _game)),
           // Game-over overlay: transparent and non-blocking until gridlock.
           Positioned.fill(child: GameOverOverlay(game: _game)),
+          // Title screen over a paused board.
+          if (_showMenu)
+            Positioned.fill(
+              child: MenuOverlay(game: _game, onPlay: _play),
+            ),
         ],
       ),
     );
