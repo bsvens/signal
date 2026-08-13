@@ -30,8 +30,16 @@ separated.
   Tier-1 gridlock). ✅ All spec §8 contracts covered.
 - **Phase 2** — Render the sim on a fixed-timestep loop. ✅
 - **Phase 3** — Tap interaction, HUD, game-over/restart. ✅ First playable.
-- **Phase 4** — Feel + difficulty tuning. _next_
-- **Phase 5** — Retention + services (high scores, leaderboard). _later_
+- **Phase 4** — Feel + difficulty tuning (spawn curve, haptics, motion). ✅
+- **Art** — Top-down city: asphalt + lane markings, signalized intersections,
+  buildings / parks / trees, typed cars with turn signals. ✅
+- **Phase 5** — Local high scores ✅; cross-platform leaderboard scaffolded
+  behind a flag (needs store setup to activate). IAP still out until retention
+  data exists.
+
+Next candidates: on-device playtest and feel tuning; multiple maps / daily
+seeded challenge; activating the leaderboard once Game Center / Play Games are
+configured.
 
 ## Develop
 
