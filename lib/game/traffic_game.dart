@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:flame/game.dart';
 import 'package:flutter/foundation.dart';
 
+import '../services/leaderboard_service.dart';
+import '../services/score_store.dart';
 import '../simulation/snapshot.dart';
 import '../simulation/traffic_simulation.dart';
 import 'board_painter.dart';
@@ -16,25 +18,45 @@ const double kTickSeconds = 0.25;
 /// timestep, and draws each snapshot. All game logic lives in the sim; this
 /// class only accumulates real time, forwards taps as intents, and renders.
 class TrafficGame extends FlameGame {
-  TrafficGame._(this._sim) : hud = ValueNotifier<SimSnapshot>(_sim.snapshot);
+  TrafficGame._(
+    this._sim, {
+    ScoreStore? scoreStore,
+    LeaderboardService? leaderboard,
+  }) : hud = ValueNotifier<SimSnapshot>(_sim.snapshot),
+       _scores = scoreStore ?? ScoreStore(),
+       _leaderboard = leaderboard ?? const NoopLeaderboardService() {
+    _scores.loadHighScore().then((v) => bestScore.value = v);
+  }
 
   factory TrafficGame({int? seed}) =>
       TrafficGame._(TrafficSimulation(seed: seed ?? _seedFromClock()));
 
   TrafficSimulation _sim;
   final BoardPainter _painter = BoardPainter();
+  final ScoreStore _scores;
+  final LeaderboardService _leaderboard;
 
   /// The latest snapshot, pushed once per tick. The Flutter HUD/overlays listen
   /// to this; the Flame render loop reads the sim directly for interpolation.
   final ValueNotifier<SimSnapshot> hud;
 
+  /// Best score across sessions. Loaded async on construction, bumped live when
+  /// a run beats it.
+  final ValueNotifier<int> bestScore = ValueNotifier<int>(0);
+
   double _accumulator = 0;
   double _elapsed =
       0; // wall time for cosmetic animation only (never sim input)
   bool _paused = false;
+  bool _gameOverHandled = false;
+  bool _newBest = false;
 
   bool get isPaused => _paused;
   bool get isGameOver => _sim.gameOver;
+
+  /// True when the just-finished run set a new personal best.
+  bool get isNewBest => _newBest;
+
   SimSnapshot get snapshot => _sim.snapshot;
 
   // The game layer is free to use the wall clock to seed a run; the seed then
@@ -64,6 +86,19 @@ class TrafficGame extends FlameGame {
     }
     if (_accumulator > kTickSeconds) _accumulator = kTickSeconds;
     if (stepped) hud.value = _sim.snapshot;
+
+    if (_sim.gameOver && !_gameOverHandled) _handleGameOver();
+  }
+
+  // Persist the score and submit to the leaderboard once, on the game-over edge.
+  void _handleGameOver() {
+    _gameOverHandled = true;
+    final finalScore = _sim.score;
+    _scores.recordScore(finalScore).then((isBest) {
+      _newBest = isBest;
+      if (isBest) bestScore.value = finalScore;
+    });
+    _leaderboard.submitScore(finalScore);
   }
 
   /// Interpolation fraction between the previous and current tick, for smooth
@@ -114,12 +149,15 @@ class TrafficGame extends FlameGame {
     _sim = TrafficSimulation(seed: _seedFromClock());
     _accumulator = 0;
     _paused = false;
+    _gameOverHandled = false;
+    _newBest = false;
     hud.value = _sim.snapshot;
   }
 
   @override
   void onRemove() {
     hud.dispose();
+    bestScore.dispose();
     super.onRemove();
   }
 }

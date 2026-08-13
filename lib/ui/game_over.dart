@@ -55,7 +55,44 @@ class GameOverOverlay extends StatelessWidget {
                   letterSpacing: 2,
                 ),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: 18),
+              ValueListenableBuilder<int>(
+                valueListenable: game.bestScore,
+                builder: (context, best, _) {
+                  if (game.isNewBest) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF35D07F),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        'NEW BEST!',
+                        style: TextStyle(
+                          color: Color(0xFF0A0C11),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    );
+                  }
+                  return Text(
+                    'BEST  $best',
+                    style: const TextStyle(
+                      color: Color(0xFF8A93A6),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.5,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 30),
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF35D07F),

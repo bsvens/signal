@@ -27,7 +27,13 @@ class Hud extends StatelessWidget {
                 children: [
                   // Read-outs ignore pointers so taps fall through to the
                   // board; only the pause button catches its own taps.
-                  IgnorePointer(child: _ScorePill(score: snap.score)),
+                  IgnorePointer(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: game.bestScore,
+                      builder: (context, best, _) =>
+                          _ScorePill(score: snap.score, best: best),
+                    ),
+                  ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: IgnorePointer(child: _QueueMeter(snapshot: snap)),
@@ -45,9 +51,10 @@ class Hud extends StatelessWidget {
 }
 
 class _ScorePill extends StatelessWidget {
-  const _ScorePill({required this.score});
+  const _ScorePill({required this.score, required this.best});
 
   final int score;
+  final int best;
 
   @override
   Widget build(BuildContext context) {
@@ -57,25 +64,41 @@ class _ScorePill extends StatelessWidget {
         color: const Color(0xCC1B2130),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'SCORE',
-            style: TextStyle(
-              color: Color(0xFF8A93A6),
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.2,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'SCORE',
+                style: TextStyle(
+                  color: Color(0xFF8A93A6),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '$score',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
           Text(
-            '$score',
+            'BEST $best',
             style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
+              color: Color(0xFF6E7688),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
