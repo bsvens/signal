@@ -6,30 +6,44 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('ScoreStore', () {
-    test('defaults to 0 when nothing is stored', () async {
+    test('defaults to empty stats when nothing is stored', () async {
       SharedPreferences.setMockInitialValues({});
-      expect(await ScoreStore().loadHighScore(), 0);
+      final s = await ScoreStore().loadStats();
+      expect(s.best, 0);
+      expect(s.gamesPlayed, 0);
+      expect(s.totalCleared, 0);
     });
 
-    test('records only scores that beat the stored best', () async {
+    test('recordRun accumulates games + total and tracks best', () async {
       SharedPreferences.setMockInitialValues({});
       final store = ScoreStore();
 
-      expect(await store.recordScore(10), isTrue); // 0 -> 10 (new best)
-      expect(await store.loadHighScore(), 10);
+      var r = await store.recordRun(10);
+      expect(r.isBest, isTrue); // 0 -> 10
+      expect(r.stats.best, 10);
+      expect(r.stats.gamesPlayed, 1);
+      expect(r.stats.totalCleared, 10);
 
-      expect(await store.recordScore(7), isFalse); // not a best
-      expect(await store.loadHighScore(), 10);
+      r = await store.recordRun(7); // not a best, but still counts
+      expect(r.isBest, isFalse);
+      expect(r.stats.best, 10);
+      expect(r.stats.gamesPlayed, 2);
+      expect(r.stats.totalCleared, 17);
 
-      expect(await store.recordScore(25), isTrue); // 10 -> 25 (new best)
-      expect(await store.loadHighScore(), 25);
+      r = await store.recordRun(25); // new best
+      expect(r.isBest, isTrue);
+      expect(r.stats.best, 25);
+      expect(r.stats.gamesPlayed, 3);
+      expect(r.stats.totalCleared, 42);
     });
 
     test('persists across store instances', () async {
       SharedPreferences.setMockInitialValues({});
-      await ScoreStore().recordScore(42);
-      // A fresh instance reads the same underlying prefs.
-      expect(await ScoreStore().loadHighScore(), 42);
+      await ScoreStore().recordRun(42);
+      final s = await ScoreStore().loadStats();
+      expect(s.best, 42);
+      expect(s.gamesPlayed, 1);
+      expect(s.totalCleared, 42);
     });
   });
 }

@@ -25,7 +25,10 @@ class TrafficGame extends FlameGame {
   }) : hud = ValueNotifier<SimSnapshot>(_sim.snapshot),
        _scores = scoreStore ?? ScoreStore(),
        _leaderboard = leaderboard ?? const NoopLeaderboardService() {
-    _scores.loadHighScore().then((v) => bestScore.value = v);
+    _scores.loadStats().then((s) {
+      bestScore.value = s.best;
+      stats.value = s;
+    });
   }
 
   factory TrafficGame({int? seed}) =>
@@ -43,6 +46,11 @@ class TrafficGame extends FlameGame {
   /// Best score across sessions. Loaded async on construction, bumped live when
   /// a run beats it.
   final ValueNotifier<int> bestScore = ValueNotifier<int>(0);
+
+  /// Lifetime stats (best, games played, total cleared) for the menu/game-over.
+  final ValueNotifier<GameStats> stats = ValueNotifier<GameStats>(
+    GameStats.empty,
+  );
 
   double _accumulator = 0;
   double _elapsed =
@@ -90,13 +98,14 @@ class TrafficGame extends FlameGame {
     if (_sim.gameOver && !_gameOverHandled) _handleGameOver();
   }
 
-  // Persist the score and submit to the leaderboard once, on the game-over edge.
+  // Persist the run and submit to the leaderboard once, on the game-over edge.
   void _handleGameOver() {
     _gameOverHandled = true;
     final finalScore = _sim.score;
-    _scores.recordScore(finalScore).then((isBest) {
-      _newBest = isBest;
-      if (isBest) bestScore.value = finalScore;
+    _scores.recordRun(finalScore).then((result) {
+      _newBest = result.isBest;
+      bestScore.value = result.stats.best;
+      stats.value = result.stats;
     });
     _leaderboard.submitScore(finalScore);
   }
@@ -181,6 +190,7 @@ class TrafficGame extends FlameGame {
   void onRemove() {
     hud.dispose();
     bestScore.dispose();
+    stats.dispose();
     super.onRemove();
   }
 }

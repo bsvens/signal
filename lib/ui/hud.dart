@@ -88,13 +88,23 @@ class _ScorePill extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '$score',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: [FontFeature.tabularFigures()],
+              // A quick scale pop each time the score ticks up — restarted by
+              // keying the animation on the score value itself.
+              TweenAnimationBuilder<double>(
+                key: ValueKey<int>(score),
+                tween: Tween(begin: 1.35, end: 1.0),
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutBack,
+                builder: (context, scale, child) =>
+                    Transform.scale(scale: scale, child: child),
+                child: Text(
+                  '$score',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ],

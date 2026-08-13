@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../game/traffic_game.dart';
+import '../services/score_store.dart';
 
 /// The title screen. Shown over a freshly-seeded, paused board so the player
 /// sees the city before the first (losable) second of play.
@@ -60,21 +61,24 @@ class MenuOverlay extends StatelessWidget {
                     onPressed: onPlay,
                     child: const Text('PLAY'),
                   ),
-                  const SizedBox(height: 16),
-                  ValueListenableBuilder<int>(
-                    valueListenable: game.bestScore,
-                    builder: (context, best, _) => best <= 0
-                        ? const SizedBox(height: 16)
-                        : Text(
-                            'BEST  $best',
-                            style: const TextStyle(
-                              color: Color(0xFF8A93A6),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.5,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
+                  const SizedBox(height: 22),
+                  ValueListenableBuilder<GameStats>(
+                    valueListenable: game.stats,
+                    builder: (context, s, _) {
+                      if (s.gamesPlayed == 0 && s.best == 0) {
+                        return const SizedBox(height: 20);
+                      }
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _menuStat('BEST', '${s.best}'),
+                          const SizedBox(width: 26),
+                          _menuStat('GAMES', '${s.gamesPlayed}'),
+                          const SizedBox(width: 26),
+                          _menuStat('CLEARED', '${s.totalCleared}'),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
@@ -94,6 +98,33 @@ class MenuOverlay extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _menuStat(String label, String value) {
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        value,
+        style: const TextStyle(
+          color: Color(0xFFEDEFF2),
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF6E7688),
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
+        ),
+      ),
+    ],
+  );
 }
 
 /// A small horizontal three-lens traffic head; only the green lens is lit — the
