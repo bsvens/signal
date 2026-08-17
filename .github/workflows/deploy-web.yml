@@ -24,6 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Configures (and self-enables) Pages, and exposes the correct base path.
+      - id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -32,8 +38,8 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
 
-      # base-href must match the Pages sub-path (https://<user>.github.io/signal/).
-      - run: flutter build web --release --base-href /signal/
+      # base-href must match the Pages sub-path (e.g. /signal/).
+      - run: flutter build web --release --base-href "${{ steps.pages.outputs.base_path }}/"
 
       - uses: actions/upload-pages-artifact@v3
         with:
