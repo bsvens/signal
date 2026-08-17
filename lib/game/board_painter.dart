@@ -79,10 +79,10 @@ class BoardPainter {
   ) {
     _paintBackdrop(canvas, canvasSize, layout);
     _paintLots(canvas, layout, grid);
+    _paintRoadStubs(canvas, canvasSize, layout, grid);
     _paintRoads(canvas, layout, grid);
-    _paintPortals(canvas, layout, grid);
     _paintJunctions(canvas, layout, grid, snapshot, timeSeconds);
-    _paintCars(canvas, layout, snapshot, alpha);
+    _paintCars(canvas, canvasSize, layout, grid, snapshot, alpha);
     _paintDanger(canvas, canvasSize, layout, snapshot);
   }
 
@@ -417,34 +417,65 @@ class BoardPainter {
     }
   }
 
-  // ---- Portals ----
+  // ---- Road stubs to the screen edge ----
 
-  void _paintPortals(Canvas canvas, GridLayout layout, CityGrid grid) {
+  // Distance from [p] to the screen edge in the (cardinal) direction [out].
+  static double _distToEdge(Offset p, Offset out, Size size) {
+    if (out.dx > 0.5) return size.width - p.dx;
+    if (out.dx < -0.5) return p.dx;
+    if (out.dy > 0.5) return size.height - p.dy;
+    return p.dy; // up
+  }
+
+  bool _isOffBoard(Cell c, CityGrid grid) =>
+      c.col < 0 || c.row < 0 || c.col > grid.maxCoord || c.row > grid.maxCoord;
+
+  // Extends every perimeter road all the way to the screen edge, so the city
+  // continues off-screen and cars can enter/leave at the border rather than
+  // popping in/out at the board's floating edge.
+  void _paintRoadStubs(
+    Canvas canvas,
+    Size size,
+    GridLayout layout,
+    CityGrid grid,
+  ) {
     final cs = layout.cellSize;
+    final halfW = cs * 0.5;
     for (final cell in grid.edgeCells) {
-      if (grid.isJunction(cell)) continue;
       for (final dir in Direction.values) {
-        final n = cell.step(dir);
-        final offBoard =
-            n.col < 0 ||
-            n.row < 0 ||
-            n.col > grid.maxCoord ||
-            n.row > grid.maxCoord;
-        if (!offBoard) continue;
-        // A short asphalt stub leading off-board, so cars enter from "town".
-        final center = layout
-            .cellCenter(cell.col, cell.row)
-            .translate(dir.dCol * cs * 0.85, dir.dRow * cs * 0.85);
-        final horizontal = dir == Direction.north || dir == Direction.south;
+        if (!_isOffBoard(cell.step(dir), grid)) continue;
+        final out = Offset(dir.dCol.toDouble(), dir.dRow.toDouble());
+        final c = layout.cellCenter(cell.col, cell.row);
+        final edgePt = c + out * halfW;
+        final screenPt = edgePt + out * _distToEdge(edgePt, out, size);
         _p.color = _asphalt;
-        canvas.drawRect(
-          Rect.fromCenter(
-            center: center,
-            width: horizontal ? cs * 0.7 : cs * 0.9,
-            height: horizontal ? cs * 0.9 : cs * 0.7,
-          ),
-          _p,
-        );
+        if (out.dy != 0) {
+          final y1 = math.min(edgePt.dy, screenPt.dy);
+          final y2 = math.max(edgePt.dy, screenPt.dy);
+          canvas.drawRect(
+            Rect.fromLTRB(c.dx - halfW, y1, c.dx + halfW, y2),
+            _p,
+          );
+          _dashedLine(
+            canvas,
+            Offset(c.dx, edgePt.dy),
+            Offset(c.dx, screenPt.dy),
+            layout,
+          );
+        } else {
+          final x1 = math.min(edgePt.dx, screenPt.dx);
+          final x2 = math.max(edgePt.dx, screenPt.dx);
+          canvas.drawRect(
+            Rect.fromLTRB(x1, c.dy - halfW, x2, c.dy + halfW),
+            _p,
+          );
+          _dashedLine(
+            canvas,
+            Offset(edgePt.dx, c.dy),
+            Offset(screenPt.dx, c.dy),
+            layout,
+          );
+        }
       }
     }
   }
@@ -561,21 +592,13 @@ class BoardPainter {
 
   // ---- Cars ----
 
-  static Offset _mid(Offset a, Offset b) =>
-      Offset((a.dx + b.dx) / 2, (a.dy + b.dy) / 2);
-
-  static Offset _bezier(Offset p0, Offset p1, Offset p2, double t) {
-    final u = 1 - t;
-    return p0 * (u * u) + p1 * (2 * u * t) + p2 * (t * t);
-  }
-
-  static Offset _bezierTangent(Offset p0, Offset p1, Offset p2, double t) {
-    return (p1 - p0) * (2 * (1 - t)) + (p2 - p1) * (2 * t);
-  }
+  static double _angleOf(Offset v) => math.atan2(v.dy, v.dx);
 
   void _paintCars(
     Canvas canvas,
+    Size size,
     GridLayout layout,
+    CityGrid grid,
     SimSnapshot snapshot,
     double alpha,
   ) {
@@ -584,47 +607,45 @@ class BoardPainter {
       final pc = layout.cellCenter(car.previousCell.col, car.previousCell.row);
       final cc = layout.cellCenter(car.cell.col, car.cell.row);
       final heading = car.heading;
-      Offset nextC() => layout.cellCenter(
-        car.cell.col + heading!.dCol,
-        car.cell.row + heading.dRow,
-      );
+      final moved = car.previousCell != car.cell;
 
       Offset pos;
       double angle;
       if (car.state == CarState.exited) {
-        // Slide out through the exit edge and off the board.
-        final dir = (cc - pc);
-        final n = dir.distance == 0 ? const Offset(1, 0) : dir / dir.distance;
-        pos = Offset.lerp(_mid(pc, cc), cc + n * cs, alpha)!;
-        angle = math.atan2(n.dy, n.dx);
-      } else if (heading == null) {
+        // Leaving: drive from the last cell out through the exit edge and off
+        // the screen along the extended road.
+        final dir = moved ? (cc - pc) : const Offset(1, 0);
+        final out = dir / (dir.distance == 0 ? 1 : dir.distance);
+        final screenPt = cc + out * _distToEdge(cc, out, size);
+        pos = Offset.lerp(pc, screenPt, alpha)!;
+        angle = _angleOf(out);
+      } else if (!moved || heading == null) {
+        // Stationary: sit at the cell centre — safely BELOW the stop line, not
+        // poking into the intersection.
         pos = cc;
-        angle = _carAngle[car.id] ?? 0;
-      } else if (car.previousCell == car.cell) {
-        // Stationary (waiting / just spawned): hold at the stop line, i.e.
-        // half a cell toward where it wants to go. This is exactly where a
-        // moving car's segment ends, so starting/stopping never jumps.
-        pos = _mid(cc, nextC());
-        angle = math.atan2(heading.dRow.toDouble(), heading.dCol.toDouble());
+        angle = heading != null
+            ? _angleOf(Offset(heading.dCol.toDouble(), heading.dRow.toDouble()))
+            : (_carAngle[car.id] ?? 0);
+      } else if (car.routeIndex == 1 && grid.isEdge(car.previousCell)) {
+        // Entering: first move off the spawn edge — drive IN from the screen
+        // edge along the extended road so it never pops in mid-map.
+        final inDir = cc - pc;
+        final out = -inDir / (inDir.distance == 0 ? 1 : inDir.distance);
+        final screenPt = pc + out * _distToEdge(pc, out, size);
+        pos = Offset.lerp(screenPt, cc, alpha)!;
+        angle = _angleOf(inDir);
       } else {
-        // Moving: a quadratic through the cell centre rounds turns smoothly;
-        // endpoints are cell midpoints so motion is continuous across ticks.
-        // On the very first segment (routeIndex 1) start off-board so the car
-        // drives in from town instead of popping onto the edge.
-        final start = car.routeIndex == 1 ? pc - (cc - pc) * 0.5 : _mid(pc, cc);
-        final end = _mid(cc, nextC());
-        pos = _bezier(start, cc, end, alpha);
-        final tan = _bezierTangent(start, cc, end, alpha);
-        angle = tan.distance > 0.001
-            ? math.atan2(tan.dy, tan.dx)
-            : math.atan2(heading.dRow.toDouble(), heading.dCol.toDouble());
+        // Normal drive: straight, clean interpolation (exact on the cell at the
+        // tick boundary, so stops are crisp and there is no jitter).
+        pos = Offset.lerp(pc, cc, alpha)!;
+        angle = _angleOf(cc - pc);
       }
 
-      // Ease the drawn angle so orientation never snaps.
+      // Ease facing so turns rotate smoothly instead of snapping.
       final prevA = _carAngle[car.id] ?? angle;
       var d = angle - prevA;
       d = math.atan2(math.sin(d), math.cos(d));
-      final ang = prevA + d * 0.35;
+      final ang = prevA + d * 0.3;
       _carAngle[car.id] = ang;
 
       // Right-hand lane offset, perpendicular to facing.
