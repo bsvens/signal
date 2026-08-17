@@ -34,6 +34,12 @@ class Car {
   /// Consecutive ticks spent blocked. Feeds gridlock detection (§6).
   int waitingTicks;
 
+  /// The tick on which this car exited, or null while still driving. Lets the
+  /// sim keep an exited car for one extra tick so rendering can slide it off
+  /// the board instead of popping it out of existence. Scoring still happens
+  /// exactly once, at the moment of exit.
+  int? exitTick;
+
   /// The cell currently occupied.
   Cell get cell => route[routeIndex];
 

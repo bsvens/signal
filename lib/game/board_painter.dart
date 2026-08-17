@@ -561,6 +561,18 @@ class BoardPainter {
 
   // ---- Cars ----
 
+  static Offset _mid(Offset a, Offset b) =>
+      Offset((a.dx + b.dx) / 2, (a.dy + b.dy) / 2);
+
+  static Offset _bezier(Offset p0, Offset p1, Offset p2, double t) {
+    final u = 1 - t;
+    return p0 * (u * u) + p1 * (2 * u * t) + p2 * (t * t);
+  }
+
+  static Offset _bezierTangent(Offset p0, Offset p1, Offset p2, double t) {
+    return (p1 - p0) * (2 * (1 - t)) + (p2 - p1) * (2 * t);
+  }
+
   void _paintCars(
     Canvas canvas,
     GridLayout layout,
@@ -569,120 +581,202 @@ class BoardPainter {
   ) {
     final cs = layout.cellSize;
     for (final car in snapshot.cars) {
-      final moved = car.previousCell != car.cell;
-      // Position: simple interpolation gives clean stops at the line; waiting
-      // cars (prev == cell) sit exactly on their cell.
-      final pos = moved
-          ? layout.lerpCenter(car.previousCell, car.cell, alpha)
-          : layout.cellCenter(car.cell.col, car.cell.row);
-
-      // Smooth heading: ease the drawn angle toward the target so turns arc
-      // instead of snapping. Cosmetic memory only.
+      final pc = layout.cellCenter(car.previousCell.col, car.previousCell.row);
+      final cc = layout.cellCenter(car.cell.col, car.cell.row);
       final heading = car.heading;
-      final target = heading != null
-          ? math.atan2(heading.dRow.toDouble(), heading.dCol.toDouble())
-          : (_carAngle[car.id] ?? 0);
-      final curr = _carAngle[car.id] ?? target;
-      var d = target - curr;
-      d = math.atan2(math.sin(d), math.cos(d)); // shortest way round
-      final ang = curr + d * 0.2;
+      Offset nextC() => layout.cellCenter(
+        car.cell.col + heading!.dCol,
+        car.cell.row + heading.dRow,
+      );
+
+      Offset pos;
+      double angle;
+      if (car.state == CarState.exited) {
+        // Slide out through the exit edge and off the board.
+        final dir = (cc - pc);
+        final n = dir.distance == 0 ? const Offset(1, 0) : dir / dir.distance;
+        pos = Offset.lerp(_mid(pc, cc), cc + n * cs, alpha)!;
+        angle = math.atan2(n.dy, n.dx);
+      } else if (heading == null) {
+        pos = cc;
+        angle = _carAngle[car.id] ?? 0;
+      } else if (car.previousCell == car.cell) {
+        // Stationary (waiting / just spawned): hold at the stop line, i.e.
+        // half a cell toward where it wants to go. This is exactly where a
+        // moving car's segment ends, so starting/stopping never jumps.
+        pos = _mid(cc, nextC());
+        angle = math.atan2(heading.dRow.toDouble(), heading.dCol.toDouble());
+      } else {
+        // Moving: a quadratic through the cell centre rounds turns smoothly;
+        // endpoints are cell midpoints so motion is continuous across ticks.
+        // On the very first segment (routeIndex 1) start off-board so the car
+        // drives in from town instead of popping onto the edge.
+        final start = car.routeIndex == 1 ? pc - (cc - pc) * 0.5 : _mid(pc, cc);
+        final end = _mid(cc, nextC());
+        pos = _bezier(start, cc, end, alpha);
+        final tan = _bezierTangent(start, cc, end, alpha);
+        angle = tan.distance > 0.001
+            ? math.atan2(tan.dy, tan.dx)
+            : math.atan2(heading.dRow.toDouble(), heading.dCol.toDouble());
+      }
+
+      // Ease the drawn angle so orientation never snaps.
+      final prevA = _carAngle[car.id] ?? angle;
+      var d = angle - prevA;
+      d = math.atan2(math.sin(d), math.cos(d));
+      final ang = prevA + d * 0.35;
       _carAngle[car.id] = ang;
 
-      // Vehicle type.
-      final type = car.id % 4;
-      double lenF, widF;
-      var isTruck = false;
-      switch (type) {
-        case 0:
-          lenF = 0.5;
-          widF = 0.27;
-        case 1:
-          lenF = 0.42;
-          widF = 0.26;
-        case 2:
-          lenF = 0.64;
-          widF = 0.3;
-          isTruck = true;
-        default:
-          lenF = 0.52;
-          widF = 0.3;
-      }
-      final len = cs * lenF, wid = cs * widF;
-
-      // Right-hand lane offset, perpendicular to travel.
+      // Right-hand lane offset, perpendicular to facing.
       final right = Offset(-math.sin(ang), math.cos(ang));
       final drawPos = pos + right * (cs * 0.16);
 
       canvas.save();
       canvas.translate(drawPos.dx, drawPos.dy);
       canvas.rotate(ang);
-      _drawCarBody(canvas, car, len, wid, isTruck);
+      _drawCarBody(canvas, car, cs);
       canvas.restore();
     }
   }
 
-  // Car drawn in local space: travels along +x, width along y.
-  void _drawCarBody(
-    Canvas canvas,
-    CarSnapshot car,
-    double len,
-    double wid,
-    bool isTruck,
-  ) {
-    final body = Rect.fromCenter(center: Offset.zero, width: len, height: wid);
-    final radius = Radius.circular(wid * 0.34);
+  // Car drawn in local space: it drives toward +x. The front (windshield +
+  // bright headlights) is deliberately distinct from the red-tail rear.
+  void _drawCarBody(Canvas canvas, CarSnapshot car, double cs) {
+    final type = car.id % 4;
+    double lenF, widF;
+    var isTruck = false;
+    switch (type) {
+      case 0:
+        lenF = 0.52;
+        widF = 0.27;
+      case 1:
+        lenF = 0.44;
+        widF = 0.26;
+      case 2:
+        lenF = 0.66;
+        widF = 0.30;
+        isTruck = true;
+      default:
+        lenF = 0.54;
+        widF = 0.30;
+    }
+    final len = cs * lenF, wid = cs * widF;
+    final radius = Radius.circular(wid * 0.3);
+    final bodyColor = _carColors[car.id % _carColors.length];
 
     // Shadow.
     _p.color = const Color(0x55000000);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(body.translate(wid * 0.12, wid * 0.14), radius),
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(0, wid * 0.14), width: len, height: wid),
+        radius,
+      ),
       _p,
     );
 
-    final bodyColor = _carColors[car.id % _carColors.length];
+    // Body.
     _p.color = bodyColor;
-    canvas.drawRRect(RRect.fromRectAndRadius(body, radius), _p);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: len, height: wid),
+        radius,
+      ),
+      _p,
+    );
 
     if (isTruck) {
       _p.color = _darken(bodyColor, 0.22);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromCenter(
-            center: Offset(-len * 0.2, 0),
-            width: len * 0.54,
+            center: Offset(-len * 0.18, 0),
+            width: len * 0.56,
             height: wid,
           ),
-          Radius.circular(wid * 0.2),
+          Radius.circular(wid * 0.18),
         ),
         _p,
       );
     }
 
-    // Windshield toward the front (+x).
-    _p.color = const Color(0xB3121820);
+    // Dark cabin toward the rear-centre.
+    _p.color = _darken(bodyColor, 0.24);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: Offset(len * 0.2, 0),
-          width: len * 0.22,
-          height: wid * 0.66,
+          center: Offset(-len * 0.06, 0),
+          width: len * 0.46,
+          height: wid * 0.74,
         ),
-        Radius.circular(wid * 0.16),
+        Radius.circular(wid * 0.2),
       ),
       _p,
     );
 
-    // Stable lights: dim always-on, brightening for state (no strobe/flip).
+    // Windshield at the FRONT of the cabin — a strong "this end is forward" cue.
+    _p.color = const Color(0xD8BFE4FF);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(len * 0.14, 0),
+          width: len * 0.15,
+          height: wid * 0.6,
+        ),
+        Radius.circular(wid * 0.12),
+      ),
+      _p,
+    );
+
     final waiting = car.state == CarState.waiting;
-    final sy = wid * 0.28;
-    // Headlights (front, +x).
-    _p.color = const Color(0xFFFFF3D0).withValues(alpha: waiting ? 0.5 : 0.95);
-    canvas.drawCircle(Offset(len * 0.44, sy), wid * 0.09, _p);
-    canvas.drawCircle(Offset(len * 0.44, -sy), wid * 0.09, _p);
-    // Tail / brake lights (rear, -x): dim red, bright when stopped.
-    _p.color = _sigRed.withValues(alpha: waiting ? 1.0 : 0.55);
-    canvas.drawCircle(Offset(-len * 0.44, sy), wid * 0.09, _p);
-    canvas.drawCircle(Offset(-len * 0.44, -sy), wid * 0.09, _p);
+    final sy = wid * 0.3;
+    // Bright twin headlights at the very front (+x).
+    _p.color = const Color(0xFFFFF6D0);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(len * 0.46, sy),
+          width: len * 0.07,
+          height: wid * 0.22,
+        ),
+        Radius.circular(wid * 0.06),
+      ),
+      _p,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(len * 0.46, -sy),
+          width: len * 0.07,
+          height: wid * 0.22,
+        ),
+        Radius.circular(wid * 0.06),
+      ),
+      _p,
+    );
+    // Red tail-lights at the rear (-x), brighter when braking.
+    _p.color = _sigRed.withValues(alpha: waiting ? 1.0 : 0.7);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(-len * 0.46, sy),
+          width: len * 0.05,
+          height: wid * 0.2,
+        ),
+        Radius.circular(wid * 0.05),
+      ),
+      _p,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(-len * 0.46, -sy),
+          width: len * 0.05,
+          height: wid * 0.2,
+        ),
+        Radius.circular(wid * 0.05),
+      ),
+      _p,
+    );
   }
 
   // ---- Danger vignette ----

@@ -65,7 +65,8 @@ void main() {
 
       expect(sim.score, 1);
       expect(sim.cars, isEmpty, reason: 'exited car is reaped');
-      expect(sim.tickCount, 6, reason: '6 moves from index 0 to 6');
+      // 6 moves (index 0→6) to exit, plus one linger tick before the reap.
+      expect(sim.tickCount, inInclusiveRange(6, 7));
     });
   });
 

@@ -113,6 +113,7 @@ class TrafficSimulation {
         if (car.atRouteEnd && grid.isEdge(car.cell)) {
           // Reached the final cell of the route (an exit edge): score once.
           car.state = CarState.exited;
+          car.exitTick = _tickCount;
           _score += 1;
           // Exited cars free their cell immediately.
         } else {
@@ -182,7 +183,9 @@ class TrafficSimulation {
   }
 
   void _reapExitedCars() {
-    _cars.removeWhere((c) => c.state == CarState.exited);
+    // Keep a car through the tick it exits (so rendering can slide it off the
+    // board); remove it on the following tick.
+    _cars.removeWhere((c) => c.exitTick != null && c.exitTick! < _tickCount);
   }
 
   void _checkGridlock() {
