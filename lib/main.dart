@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'game/traffic_game.dart';
+import 'simulation/axis.dart';
 import 'ui/game_over.dart';
 import 'ui/hud.dart';
 import 'ui/menu.dart';
@@ -63,10 +64,50 @@ class _GameScreenState extends State<GameScreen> {
     _wasGameOver = over;
   }
 
-  void _onTapDown(TapDownDetails details) {
-    if (_game.handleTapAtPixel(details.localPosition)) {
-      HapticFeedback.selectionClick();
+  // --- Input: tap flips one junction (OG); drag syncs a run into a green wave
+  // (the Mini-Metro bridge). We track pointers ourselves so a quick touch is a
+  // tap and any drag becomes a wave, without gesture-arena ambiguity.
+  Offset? _pointerStart;
+  bool _dragging = false;
+  RoadAxis _waveAxis = RoadAxis.ew;
+  final Set<int> _wave = {};
+
+  void _onPointerDown(PointerDownEvent e) {
+    _pointerStart = e.localPosition;
+    _dragging = false;
+    _wave.clear();
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    final start = _pointerStart;
+    if (start == null) return;
+    if (!_dragging && (e.localPosition - start).distance > 14) {
+      _dragging = true;
     }
+    if (!_dragging) return;
+    // Swipe direction picks the axis: drag across a row → east-west green.
+    if (e.delta.distance > 0.5) {
+      _waveAxis = e.delta.dx.abs() >= e.delta.dy.abs()
+          ? RoadAxis.ew
+          : RoadAxis.ns;
+    }
+    final id = _game.junctionIdAtPixel(e.localPosition);
+    if (id != null && _wave.add(id)) {
+      if (_game.alignJunction(id, _waveAxis)) {
+        HapticFeedback.selectionClick();
+      }
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    if (!_dragging && _pointerStart != null) {
+      if (_game.handleTapAtPixel(_pointerStart!)) {
+        HapticFeedback.selectionClick();
+      }
+    }
+    _pointerStart = null;
+    _dragging = false;
+    _wave.clear();
   }
 
   @override
@@ -75,12 +116,14 @@ class _GameScreenState extends State<GameScreen> {
       backgroundColor: const Color(0xFF10131A),
       body: Stack(
         children: [
-          // The board. A transparent tap layer sits directly over it and
-          // converts pixels to a junction toggle.
+          // The board. A transparent input layer over it turns a tap into a
+          // single toggle and a drag into a synced green wave.
           Positioned.fill(
-            child: GestureDetector(
+            child: Listener(
               behavior: HitTestBehavior.opaque,
-              onTapDown: _onTapDown,
+              onPointerDown: _onPointerDown,
+              onPointerMove: _onPointerMove,
+              onPointerUp: _onPointerUp,
               child: GameWidget(game: _game),
             ),
           ),

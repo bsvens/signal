@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import '../services/leaderboard_service.dart';
 import '../services/score_store.dart';
+import '../simulation/axis.dart';
+import '../simulation/junction.dart';
 import '../simulation/snapshot.dart';
 import '../simulation/traffic_simulation.dart';
 import 'board_painter.dart';
@@ -135,32 +137,48 @@ class TrafficGame extends FlameGame {
   GridLayout _layout() =>
       GridLayout(size: Size(size.x, size.y), maxCoord: _sim.grid.maxCoord);
 
-  /// Forward a tap (in logical pixels) to the sim. Returns true if it toggled a
-  /// junction, so the caller can fire haptic feedback only on a real action.
-  bool handleTapAtPixel(Offset p) {
-    if (_sim.gameOver) return false;
+  /// The junction at a pixel — exact hit, else the nearest within a comfortable
+  /// radius so panicked near-misses still count. Pure input mapping.
+  Junction? _junctionNear(Offset p) {
     final layout = _layout();
-
-    // Exact hit first; then forgive near-misses by snapping to the nearest
-    // junction within a comfortable radius (a panicked tap on the road beside a
-    // junction should still count). Pure input mapping — the sim only ever
-    // receives toggleJunction(id).
     final cell = layout.cellAt(p);
-    var junction = cell == null ? null : _sim.grid.junctionAt(cell);
-    if (junction == null) {
-      final maxDist = layout.cellSize * 0.8;
-      var best = double.infinity;
-      for (final j in _sim.grid.junctions) {
-        final c = layout.cellCenter(j.cell.col, j.cell.row);
-        final d = (c - p).distance;
-        if (d < best && d <= maxDist) {
-          best = d;
-          junction = j;
-        }
+    final exact = cell == null ? null : _sim.grid.junctionAt(cell);
+    if (exact != null) return exact;
+    final maxDist = layout.cellSize * 0.8;
+    Junction? best;
+    var bestD = double.infinity;
+    for (final j in _sim.grid.junctions) {
+      final d = (layout.cellCenter(j.cell.col, j.cell.row) - p).distance;
+      if (d < bestD && d <= maxDist) {
+        bestD = d;
+        best = j;
       }
     }
+    return best;
+  }
+
+  /// Id of the junction at [p], or null. Used by the swipe-to-group gesture.
+  int? junctionIdAtPixel(Offset p) =>
+      _sim.gameOver ? null : _junctionNear(p)?.id;
+
+  /// Single-tap toggle (the classic one-junction flip). Returns true on a hit.
+  bool handleTapAtPixel(Offset p) {
+    if (_sim.gameOver) return false;
+    final junction = _junctionNear(p);
     if (junction == null) return false;
     _sim.toggleJunction(junction.id);
+    hud.value = _sim.snapshot;
+    return true;
+  }
+
+  /// Force a junction onto [axis] (used by the green-wave swipe). Only acts —
+  /// and only reports true — when it actually changes state, so a swipe fires
+  /// one haptic per junction it flips. Still expressed as toggle intents, so
+  /// runs stay deterministic.
+  bool alignJunction(int id, RoadAxis axis) {
+    if (_sim.gameOver) return false;
+    if (_sim.grid.junctionById(id).greenAxis == axis) return false;
+    _sim.toggleJunction(id);
     hud.value = _sim.snapshot;
     return true;
   }
